@@ -692,16 +692,36 @@
       .tooltip .tActions button{ padding:8px 10px; font-size:12px; border-radius: 12px; }
 
       .tipArrow{
-        position: absolute;
-        z-index: 9997;
-        width: 14px; height: 14px;
-        background: rgba(255,255,255,.98);
-        border-left: 1px solid rgba(15,23,42,.16);
-        border-top: 1px solid rgba(15,23,42,.16);
-        transform: rotate(45deg);
-        display:none;
-      }
-      .tipArrow.show{ display:block; }
+  position:absolute;
+  z-index:9997;
+  width:14px;
+  height:14px;
+  background:rgba(255,255,255,.98);
+  border-left:1px solid rgba(15,23,42,.12);
+  border-top:1px solid rgba(15,23,42,.12);
+  transform:rotate(45deg);
+  display:none;
+  box-shadow: 0 4px 10px rgba(2,6,23,.06);
+}
+.tipArrow.show{
+  display:block;
+}
+     @media (max-width: 480px){
+  .tooltip{
+    width:min(300px, calc(100vw - 20px));
+    border-radius:14px;
+    padding:10px 10px 8px;
+  }
+
+  .tooltip .tTitle{
+    font-size:13px;
+  }
+
+  .tooltip .tBody{
+    font-size:11px;
+    line-height:1.45;
+  }
+}
 
       /* overlays */
      .overlay{
@@ -3988,19 +4008,22 @@ function renderTopMenuUI(){
     }).join("");
   }
 
-  function updateUI(){
-    updateStatusPill();
-    renderTimer();
-    renderControls();
-    renderGateUX();
-    renderToday();
-    setReportVisible(state.status==="stopped");
-    renderUndoRedo();
-    renderGatePageUI();
-    renderTopMenuUI(); // if gate page exists
-     renderHomeHud(); 
-  }
+ function updateUI(){
+  updateStatusPill();
+  renderTimer();
+  renderControls();
+  renderGateUX();
+  renderToday();
+  setReportVisible(state.status==="stopped");
+  renderUndoRedo();
+  renderGatePageUI();
+  renderTopMenuUI();
+  renderHomeHud();
 
+  if(state.status === "stopped"){
+    loadReportDraft(); // ✅ เพิ่มตรงนี้
+  }
+}
   /* =========================
    RANDOM QUEST / DICE ENGINE PATCH v1.5
    history-first + real-time aware
@@ -4557,29 +4580,67 @@ function rqShowIfEligible(){
   el.diceFab.style.display = "flex";
 
   const blockedByGate = (isGateActiveToday() && !gate.passed && !isFirstQuestAlreadyDoneToday());
-  el.diceBtn.disabled = blockedByGate || rqIsCooldown();
+  const selected = rqGetSelected();
 
   if(blockedByGate){
+    el.diceBtn.disabled = true;
     el.diceCd.classList.add("show");
     el.diceCd.innerHTML = `ผ่าน Gate ก่อนถึงจะสุ่มได้`;
-  }else{
-    rqTickUI();
+    return;
   }
-}
 
+  // 🔧 ถ้ามี quest ค้างอยู่ ต้องเปิด dice ได้
+  if(selected){
+    el.diceBtn.disabled = false;
+    rqTickUI();
+    return;
+  }
+
+  // ไม่มี quest ค้าง → ใช้ cooldown ปกติ
+  el.diceBtn.disabled = rqIsCooldown();
+
+  rqTickUI();
+}
 function rqTickUI(){
   if(!el.diceBtn || !el.diceCd) return;
 
   const locked = rqIsCooldown();
+  const selected = rqGetSelected();
 
+  // ถ้ามี quest ค้างอยู่ -> เปิดดูได้เสมอ
+  if(selected){
+
+    el.diceBtn.disabled = false;
+    el.diceBtn.classList.add("dicePulse");
+
+    el.diceCd.classList.add("show");
+    el.diceCd.innerHTML = locked
+      ? `เควสเดิม • Cooldown: <b>${rqCooldownLeft()}</b>`
+      : `มีเควสที่สุ่มไว้แล้ว`;
+
+    if(el.rqPickLow)  el.rqPickLow.disabled  = locked;
+    if(el.rqPickMid)  el.rqPickMid.disabled  = locked;
+    if(el.rqPickHigh) el.rqPickHigh.disabled = locked;
+
+    rqRenderSelectedToModal();
+    return;
+  }
+
+  // ไม่มี quest ค้าง
   if(locked){
+
     el.diceCd.classList.add("show");
     el.diceCd.innerHTML = `Cooldown: <b>${rqCooldownLeft()}</b>`;
+
     el.diceBtn.classList.remove("dicePulse");
     el.diceBtn.disabled = true;
+
   }else{
+
     el.diceCd.classList.remove("show");
     el.diceBtn.classList.add("dicePulse");
+    el.diceBtn.disabled = false;
+
   }
 
   if(el.rqPickLow)  el.rqPickLow.disabled  = locked;
@@ -4588,7 +4649,6 @@ function rqTickUI(){
 
   rqRenderSelectedToModal();
 }
-
 /* ---------- actions ---------- */
 function rqHandleRandom(energy){
   if(state.status !== "idle"){
@@ -4784,30 +4844,32 @@ function rqStartNow(){
   }
 
   function stopQuest(){
-    if(!(state.status==="running" || state.status==="paused")) return;
+  if(!(state.status==="running" || state.status==="paused")) return;
 
-    const now = Date.now();
-    const elapsed = (state.status==="running") ? computeElapsedMs(now) : state.elapsedBefore;
+  const now = Date.now();
+  const elapsed = (state.status==="running") ? computeElapsedMs(now) : state.elapsedBefore;
 
-    state.status="stopped";
-    state.startTs=null;
-    state.elapsedBefore=elapsed;
-    state.lastElapsedMs=elapsed;
-    saveState();
+  state.status="stopped";
+  state.startTs=null;
+  state.elapsedBefore=elapsed;
+  state.lastElapsedMs=elapsed;
+  saveState();
 
-    const minutes = Math.max(0, Math.round(elapsed/60000));
-    if(el.reportMinutes) el.reportMinutes.value = String(minutes);
-    applyBonusRule(minutes);
+  const minutes = Math.max(0, Math.round(elapsed/60000));
+  if(el.reportMinutes) el.reportMinutes.value = String(minutes);
+  applyBonusRule(minutes);
 
-    const dateKey = state.startDateKey || localDateKey();
-    updateCapHint(dateKey, state.questName);
+  const dateKey = state.startDateKey || localDateKey();
+  updateCapHint(dateKey, state.questName);
 
-    clearSubmitMessages();
-    setReportVisible(true);
-    updateUI();
-    scrollToId("sec-report");
-  }
+  clearSubmitMessages();
+  setReportVisible(true);
 
+  saveReportDraft(); // ✅ เพิ่มบรรทัดนี้
+
+  updateUI();
+  scrollToId("sec-report");
+}
   function discardReport(){
     state.status="idle";
     state.startTs=null;
@@ -5098,53 +5160,71 @@ clearReportDraft();
   กันสุ่มซ้ำในวันเดียว` }
   };
 
-  function showTooltip(anchorEl, tipKey){
-    if(!el.tooltip || !el.tipArrow || !el.tipTitle || !el.tipBody || !el.appScroll) return;
+function showTooltip(anchorEl, tipKey){
+  if(!el.tooltip || !el.tipArrow || !el.tipTitle || !el.tipBody || !el.appScroll) return;
 
-    const tip = TIPS[tipKey] || { title:"Tip", body:"-" };
-    el.tipTitle.textContent = tip.title;
-    el.tipBody.textContent = tip.body;
+  const tip = TIPS[tipKey] || { title:"Tip", body:"-" };
+  el.tipTitle.textContent = tip.title;
+  el.tipBody.textContent = tip.body;
 
-    const sc = el.appScroll;
-    const scRect = sc.getBoundingClientRect();
-    const rect = anchorEl.getBoundingClientRect();
+  const sc = el.appScroll;
+  const scRect = sc.getBoundingClientRect();
+  const rect = anchorEl.getBoundingClientRect();
 
-    const pad = 10;
-    const tw = Math.min(340, scRect.width - 24);
+  const pad = 12;
+  const arrowSize = 14;
 
-    const anchorLeftInApp = (rect.left - scRect.left) + sc.scrollLeft;
-    const anchorTopInApp  = (rect.top  - scRect.top)  + sc.scrollTop;
+  const maxWidth = Math.min(340, scRect.width - 24);
+  const tooltipWidth = maxWidth;
 
-    let left = anchorLeftInApp;
-    let top  = anchorTopInApp + rect.height + pad;
+  const anchorCenterX = (rect.left - scRect.left) + sc.scrollLeft + (rect.width / 2);
+  const anchorTopInApp = (rect.top - scRect.top) + sc.scrollTop;
+  const anchorBottomInApp = anchorTopInApp + rect.height;
 
-    left = Math.max(sc.scrollLeft + 12, Math.min(left, sc.scrollLeft + scRect.width - tw - 12));
+  el.tooltip.style.width = tooltipWidth + "px";
+  el.tooltip.style.left = "-9999px";
+  el.tooltip.style.top = "-9999px";
+  el.tooltip.classList.add("show");
 
-    const approxH = 200;
-    if(top + approxH > sc.scrollTop + sc.clientHeight - 12){
-      top = anchorTopInApp - approxH - pad;
-    }
-    top = Math.max(sc.scrollTop + 12, top);
+  const tooltipHeight = el.tooltip.offsetHeight || 160;
 
-    el.tooltip.style.left = left + "px";
-    el.tooltip.style.top  = top + "px";
-    el.tooltip.style.width = tw + "px";
-    el.tooltip.classList.add("show");
+  let left = anchorCenterX - (tooltipWidth / 2);
 
-    const arrowSize = 14;
-    let ax = anchorLeftInApp + 10;
-    ax = Math.max(sc.scrollLeft + 12, Math.min(ax, sc.scrollLeft + scRect.width - arrowSize - 12));
-    const ay = (top > anchorTopInApp) ? (anchorTopInApp + rect.height + 2) : (anchorTopInApp - arrowSize - 2);
+  const minLeft = sc.scrollLeft + pad;
+  const maxLeft = sc.scrollLeft + scRect.width - tooltipWidth - pad;
+  left = Math.max(minLeft, Math.min(left, maxLeft));
 
-    el.tipArrow.style.left = ax + "px";
-    el.tipArrow.style.top  = ay + "px";
-    el.tipArrow.classList.add("show");
-  }
-  function hideTooltip(){
-    el.tooltip?.classList.remove("show");
-    el.tipArrow?.classList.remove("show");
+  let top = anchorBottomInApp + 10;
+  let placeAbove = false;
+
+  if(top + tooltipHeight > sc.scrollTop + sc.clientHeight - pad){
+    top = anchorTopInApp - tooltipHeight - 10;
+    placeAbove = true;
   }
 
+  top = Math.max(sc.scrollTop + pad, top);
+
+  el.tooltip.style.left = left + "px";
+  el.tooltip.style.top = top + "px";
+
+  let arrowLeft = anchorCenterX - (arrowSize / 2);
+  const arrowMin = left + 14;
+  const arrowMax = left + tooltipWidth - arrowSize - 14;
+  arrowLeft = Math.max(arrowMin, Math.min(arrowLeft, arrowMax));
+
+  const arrowTop = placeAbove
+    ? (top + tooltipHeight - (arrowSize / 2))
+    : (top - (arrowSize / 2));
+
+  el.tipArrow.style.left = arrowLeft + "px";
+  el.tipArrow.style.top = arrowTop + "px";
+  el.tipArrow.classList.add("show");
+}
+
+function hideTooltip(){
+  el.tooltip?.classList.remove("show");
+  el.tipArrow?.classList.remove("show");
+}
   /* =========================
     ONBOARDING
   ========================= */
@@ -5185,6 +5265,21 @@ function loadReportDraft(){
     if(el.reportMinutes) el.reportMinutes.value = d.minutes || "";
     if(el.qualityBonus) el.qualityBonus.value = d.bonus || "0";
     if(el.notes) el.notes.value = d.notes || "";
+
+    const minutes = Number(d.minutes || 0);
+    if(Number.isFinite(minutes) && minutes > 0){
+      applyBonusRule(minutes);
+
+      const dateKey = state.startDateKey || localDateKey();
+      const qn = normQuestName(state.questName || el.questName?.value || "");
+      if(qn){
+        updateCapHint(dateKey, qn);
+      }
+
+      if(el.draftHint){
+        el.draftHint.style.display = "block";
+      }
+    }
 
   }catch(e){}
 }
@@ -5458,6 +5553,20 @@ on(el.notes, "input", saveReportDraft);
     );
   });
   
+
+document.addEventListener("visibilitychange", ()=>{
+  if(!document.hidden){
+    syncGateRuntimeFromCfg();
+    gateMaybeLock();
+    gateCheckFirstQuestQualify();
+    gateEnforceStartButton();
+    renderGateUX();
+    rqTickUI();
+    renderGatePageUI();
+  }
+});
+
+
 /* ========= RENDER ========= */
   function renderHomeHud(){
   const todayKey = localDateKey();
@@ -5492,14 +5601,29 @@ function switchPage(pageId){
   }
 }
   /* ===== Random Quest events ===== */
-  on(el.diceBtn, "click", ()=>{
-    if(rqIsCooldown()){
-      rqTickUI();
-      showTimerWarn("ติด cooldown");
-      return;
-    }
+on(el.diceBtn, "click", ()=>{
+  console.log("DICE CLICKED");
+  const selected = rqGetSelected?.();
+  console.log("selected =", selected);
+  console.log("disabled =", el.diceBtn?.disabled);
+
+  if(selected){
+    console.log("OPEN EXISTING MODAL");
     rqOpenModal();
-  });
+    rqRenderSelectedToModal?.();
+    return;
+  }
+
+  if(rqIsCooldown?.()){
+    console.log("COOLDOWN BLOCK");
+    rqTickUI?.();
+    showTimerWarn?.("ติด cooldown");
+    return;
+  }
+
+  console.log("OPEN EMPTY MODAL");
+  rqOpenModal();
+});
   on(el.rqClose, "click", rqCloseModal);
   on(el.rqOverlay, "click", (e)=>{ if(e.target===el.rqOverlay) rqCloseModal(); });
 
@@ -5522,7 +5646,19 @@ function switchPage(pageId){
     hideTooltip();
   }
 });
+/* ===== Draft autosave (mobile safe) ===== */
 
+document.addEventListener("visibilitychange", ()=>{
+  if(document.hidden && state.status === "stopped"){
+    saveReportDraft();
+  }
+});
+
+window.addEventListener("beforeunload", ()=>{
+  if(state.status === "stopped"){
+    saveReportDraft();
+  }
+});
   /* =========================
     BACKGROUND FIX
   ========================= */
